@@ -61,6 +61,7 @@ class AI4CodeModel(PreTrainedModel):
         loss = None
         if labels is not None:
 
+            labels = labels[labels > 0]
 
             if self.config.multisample_dropout:
                 loss, logits = self.multisample_dropout(outputs, self.classifier, labels, self.loss_fct, self.ln, mask)
@@ -68,7 +69,7 @@ class AI4CodeModel(PreTrainedModel):
 
                 logits = self.classifier(self.ln(self.dropout(outputs)))
 
-                loss = self.loss_fct(logits[mask].view(-1), labels[mask].view(-1))
+                loss = self.loss_fct(logits[mask].view(-1), labels.view(-1))
 
         else:
             logits = self.classifier(self.ln(outputs))
@@ -127,10 +128,8 @@ class MultiSampleDropout(nn.Module):
         # if not using output layer_nm, pass nn.Identity()
 
         logits = [linear(layer_nm(d(hidden_states))) for d in self.dropouts]
-  
-        labels = labels[mask].view(-1)
 
-        losses = [loss_fn(log[mask].view(-1), labels) for log in logits]
+        losses = [loss_fn(log[mask].view(-1), labels.view(-1)) for log in logits]
 
         logits = torch.mean(torch.stack(logits, dim=0), dim=0)
         loss = torch.mean(torch.stack(losses, dim=0), dim=0)
