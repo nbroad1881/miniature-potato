@@ -58,7 +58,7 @@ class DataModule:
             )
 
             if self.cfg["DEBUG"]:
-                self.orders_ds = self.orders_ds.select(range(1000))
+                self.orders_ds = self.orders_ds.select(range(10_000))
 
             self.orders_ds = self.orders_ds.map(
                 lambda x: {"length": [len(x.split()) for x in x["cell_order"]]},
@@ -152,19 +152,24 @@ class DataModule:
             example["source"],
             padding=False,
             truncation=False,
-            add_special_tokens=False,
+            add_special_tokens=True,
         )
 
         total_tokens = len(list(chain(*tokenized["input_ids"])))
+        
+        # get rid of first cls and last eos
+        input_ids = [x[1:-1] for x in tokenized["input_ids"]]
 
         new_ids = []
         max_length = self.cfg["max_length"]
         if total_tokens > (max_length - len(example["source"])):
+            markdown_idxs = set([i for i, cell_type in enumerate(example["cell_type"]) if cell_type == "markdown"]) 
+            markdown_length = len(list(chain([x for i, x in enumerate(tokenized["input_ids"]) if i in markdown_idxs])))
             chunk_size = (max_length - len(example["source"])) // len(example["source"])
-            new_ids = [x[:chunk_size] for x in tokenized["input_ids"]]
+            new_ids = [x[:chunk_size] for x in input_ids]
             return {"input_id_list": new_ids}
 
-        return {"input_id_list": tokenized["input_ids"]}
+        return {"input_id_list": input_ids}
 
     def add_cls_tokens(self, example, max_length=1024):
         new_ids = []

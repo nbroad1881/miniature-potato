@@ -57,11 +57,13 @@ class AI4CodeModel(PreTrainedModel):
         )[0]
 
         mask = torch.logical_or(*[input_ids == id_ for id_ in self.cls_token_ids])
-
+        # import pdb; pdb.set_trace()
         loss = None
         if labels is not None:
 
-            labels = labels[labels > 0]
+            labels = labels[labels > -1]
+            
+
 
             if self.config.multisample_dropout:
                 loss, logits = self.multisample_dropout(outputs, self.classifier, labels, self.loss_fct, self.ln, mask)
