@@ -57,14 +57,14 @@ class DataModule:
                 self.fold_idxs = pickle.load(fp)
             print("Loading dataset from disk", self.cfg["load_from_disk"])
             if self.cfg["DEBUG"]:
-                self.ds = self.ds.select(range(1000))
+                self.ds = self.ds.select(range(self.cfg["n_debug"]))
         else:
             self.orders_ds = load_dataset(
                 "csv", data_files=str(self.data_dir / "train_orders.csv"), split="train"
             )
 
             if self.cfg["DEBUG"]:
-                self.orders_ds = self.orders_ds.select(range(10_000))
+                self.orders_ds = self.orders_ds.select(range(self.cfg["n_debug"]))
 
             self.orders_ds = self.orders_ds.map(
                 lambda x: {"length": [len(x.split()) for x in x["cell_order"]]},

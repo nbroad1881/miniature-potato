@@ -1,5 +1,6 @@
 # RunArguments
 DEBUG: yes
+n_debug: 1e4
 n_gpu: 1
 num_proc: 7
 
@@ -11,7 +12,7 @@ layer_lr_alpha: 0.8
 
 # data
 k_folds: 5
-max_length: 1024
+max_length: 1536
 padding: no
 stride: 0
 data_dir: "./data"
