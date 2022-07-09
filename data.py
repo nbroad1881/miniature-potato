@@ -105,6 +105,7 @@ class DataModule:
                 batched=False,
                 num_proc=self.cfg["num_proc"],
                 desc="Adding CLS tokens",
+                fn_kwargs={"max_length":self.cfg["max_length"]}
             )
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
