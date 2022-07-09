@@ -184,9 +184,10 @@ class PredictFirstDataModule:
 
             self.ds = self.ds.map(
                 self.tokenize,
-                batched=False,
+                batched=True,
                 num_proc=self.cfg["num_proc"],
                 desc="Tokenizing",
+                remove_columns=self.ds.column_names
             )
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
@@ -213,7 +214,7 @@ class PredictFirstDataModule:
         for source, cell_type, labels in zipped:
             true_first_idx = labels.index(0.0)
             md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
-            idxs = list(set([true_first_idx]+np.random.choice(md_idxs, 3)))
+            idxs = list(set([0,true_first_idx]+list(np.random.choice(md_idxs.ravel(), 3))))
             
             all_labels.extend([1 if i==true_first_idx else 0 for i in idxs ])
             texts.extend([source[i] for i in idxs])
