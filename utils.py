@@ -80,7 +80,7 @@ def set_wandb_env_vars(cfg):
 
 def reinit_model_weights(model, n_layers, config):
 
-    backbone = model.backbone
+    backbone = getattr(model, "backbone", model)
     if config.model_type == "bart":
         std = config.init_std
     else:
