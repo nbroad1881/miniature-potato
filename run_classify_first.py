@@ -120,7 +120,7 @@ if __name__ == "__main__":
             }
         )
 
-        model = AutoModelForSequenceClassification(
+        model = AutoModelForSequenceClassification.from_pretrained(
             cfg["model_name_or_path"],
             config=model_config
         )
