@@ -41,19 +41,25 @@ def ai4code_compute_metrics(eval_preds, eval_dataset):
 
     pred_ids = []
     idx = 0
-    for cell_ids in eval_dataset["cell_ids"]:
+    for cell_ids, cell_types in zip(eval_dataset["cell_ids"], eval_dataset["cell_type"]):
         num2add = len(cell_ids)
+
+
 
         temp_df = pd.DataFrame(
             {
                 "scores": preds[idx : idx + num2add],
                 "cell_ids": cell_ids,
+                "cell_type": cell_types
             }
         )
+        temp_df.loc[temp_df.cell_type=="code", "scores"] = temp_df.loc[temp_df.cell_type=="code", "scores"].rank(pct=True)
         temp_df = temp_df.sort_values(by="scores")
         pred_ids.append(temp_df["cell_ids"].tolist())
 
         idx += num2add
+        
+    assert idx == len(preds)
 
     kt = kendall_tau(pred_ids, eval_dataset["correct_order"])
 
