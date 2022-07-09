@@ -325,7 +325,7 @@ def create_model_card(config, metrics, wandb_run_id):
             datasets=config["dataset_name"],
         ),
         template_path=template_path, 
-        model_id=config["output"],  
+        model_id=f"{config['output']}-f{config['fold']}",  
         dataset_name=config["dataset_name"], 
         metrics=json.dumps(metrics, indent=4),
         config=json.dumps(config, indent=4),
