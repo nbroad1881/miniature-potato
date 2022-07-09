@@ -1,0 +1,168 @@
+# RunArguments
+DEBUG: yes
+n_debug: 25000
+n_gpu: 1
+num_proc: 7
+
+
+min_score_to_save: 0.9
+use_8bit: no
+use_layerwise_lr: no
+layer_lr_alpha: 0.8
+
+# data
+k_folds: 5
+max_length: 512
+padding: no
+stride: 0
+data_dir: "./data"
+lowercase: yes
+stratify_on: "length"
+fold_groups: "ancestor_id"
+load_from_disk: 
+pad_multiple: 8
+dataset_name: "ai4code"
+
+# model
+model_name_or_path: "microsoft/deberta-v3-base"
+reinit_layers: 0
+layer_norm_eps: 1e-7
+dropout: 0.2
+multisample_dropout: 
+  # - 0.5
+  # - 0.5
+  # - 0.5
+  # - 0.5
+  # - 0.5
+  # - 0.5
+  # - 0.5
+  # - 0.5
+output_layer_norm: no
+
+# frozen
+n_frozen_layers: 0
+freeze_embeds: no
+
+# WandB Config
+project: ai4code
+entity: nbroad
+group: classify_first
+tags:
+ - classify_first
+notes: >
+  
+job_type: train
+
+# TrainingArguments
+# <default> means use default value
+training_arguments:
+# output
+  output_dir: "./"
+  overwrite_output_dir: yes
+
+# dataloader
+  dataloader_num_workers: 4
+  dataloader_pin_memory: yes
+
+# training
+  do_train: yes
+  resume_from_checkpoint:
+  seed: 18
+
+# hyperparams
+  per_device_train_batch_size: 16
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: no
+  group_by_length: yes
+  learning_rate: 3e-5
+  weight_decay: .01
+
+# schedule + steps
+  num_train_epochs: 3
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  warmup_steps: 0
+  max_steps: -1
+
+# optimizer
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1e-6
+  max_grad_norm: 1.0
+  optim: 'adamw_torch'
+  adafactor: no
+
+# logging
+  log_level: "warning"
+  log_level_replica: <default>
+  log_on_each_node: <default>
+  logging_dir: <default>
+  logging_strategy: steps
+  logging_first_step: no
+  logging_steps: 10
+  logging_nan_inf_filter: <default>
+
+# dtype
+  bf16: no
+  fp16: yes
+  fp16_opt_level: "O1"
+  half_precision_backend: "auto"
+  bf16_full_eval: no
+  fp16_full_eval: no
+  tf32: no
+
+# saving (will be handled by callback)
+  save_strategy: "steps"
+  save_steps: 300000
+  save_total_limit: 1
+  load_best_model_at_end: no
+  metric_for_best_model: "eval_proba_pearson"
+
+# evaluation
+  do_eval: yes
+  evaluation_strategy: "epoch"
+  eval_steps: 500
+  eval_delay: 0
+  per_device_eval_batch_size: 32
+  do_predict:
+  
+# hub
+  push_to_hub: yes
+  hub_model_id:
+  hub_strategy: "every_save"
+  hub_token:
+
+# misc
+  report_to: "wandb"
+  hub_private_repo: yes
+
+# rarely used
+  debug: <default>
+  prediction_loss_only: <default>
+  per_gpu_train_batch_size: <default>
+  per_gpu_eval_batch_size: <default>
+  eval_accumulation_steps: <default>
+  save_on_each_node: <default>
+  no_cuda: <default>
+  local_rank: <default>
+  xpu_backend: <default>
+  tpu_num_cores: <default>
+  tpu_metrics_debug: <default>
+  dataloader_drop_last: <default>
+  past_index: <default>
+  run_name: <default>
+  disable_tqdm: <default>
+  remove_unused_columns: <default>
+  label_names: <default>
+  greater_is_better: <default>
+  ignore_data_skip: <default>
+  sharded_ddp: <default>
+  deepspeed: <default>
+  label_smoothing_factor: <default>
+  length_column_name: <default>
+  ddp_find_unused_parameters: <default>
+  ddp_bucket_cap_mb: <default>
+  skip_memory_metrics: <default>
+  use_legacy_prediction_loop: <default>
+  fp16_backend: <default>
+  mp_parameters: <default>
