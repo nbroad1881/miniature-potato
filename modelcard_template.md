@@ -8,11 +8,15 @@ This model is fine-tuned on the {{ dataset_name }} for the Kaggle AI4Code Compet
 
 ## Metrics
 
+```
 {{ metrics }}
+```
 
 ## Configuration
 
+```
 {{ config }}
+```
 
 ## Weights and Biases
 
