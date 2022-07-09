@@ -5,8 +5,7 @@ from functools import partial
 
 import wandb
 import torch
-import numpy as np
-from transformers import Trainer, TrainingArguments, AutoConfig, DataCollatorWithPadding, DataCollatorForTokenClassification
+from transformers import Trainer, TrainingArguments, AutoConfig
 from transformers.trainer_utils import set_seed
 from transformers.integrations import WandbCallback
 
@@ -16,18 +15,20 @@ from utils import (
     get_configs,
     set_wandb_env_vars,
     reinit_model_weights,
-    ai4code_compute_metrics,
     create_optimizer,
     create_scheduler,
     push_to_hub,
+)
+from data import (
+    DataModule,
     AI4CodeDataCollator,
 )
-from data import DataModule
 from modeling import (
     get_pretrained,
 )
+from metrics import ai4code_compute_metrics
 
-os.environ["TOKENIZERS_PARALLELISM"]="false"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def parse_args():
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     cfg, args = get_configs(config_file)
     set_seed(args["seed"])
     set_wandb_env_vars(cfg)
-    
+
     cfg["output"] = output
     cfg["load_from_disk"] = load_from_disk
     dm = DataModule(cfg)
@@ -96,14 +97,9 @@ if __name__ == "__main__":
             dm.tokenizer.convert_ids_to_tokens(train_dataset[0]["input_ids"]),
         )
 
-        # val_ids = np.array(eval_dataset["cell_ids"], dtype=object)
-        # val_correct_order = np.array(eval_dataset["correct_order"], dtype=object)
-
         compute_metrics = partial(
             ai4code_compute_metrics,
             eval_dataset=eval_dataset,
-            # val_ids=val_ids,
-            # val_correct_order=val_correct_order,
         )
 
         model_config = AutoConfig.from_pretrained(
@@ -144,13 +140,6 @@ if __name__ == "__main__":
         collator = AI4CodeDataCollator(
             tokenizer=dm.tokenizer, pad_to_multiple_of=cfg["pad_multiple"], padding=True
         )
-        
-#         class Trainer2(Trainer):
-            
-#             def evaluation_loop(self, *args, **kwargs):
-#                 import pdb; pdb.set_trace()
-                
-#                 return super().evaluation_loop(*args, **kwargs)
 
         trainer = Trainer(
             model=model,
@@ -163,25 +152,25 @@ if __name__ == "__main__":
             data_collator=collator,
             optimizers=(optimizer, scheduler),
         )
-        
-
 
         trainer.remove_callback(WandbCallback)
 
         trainer.train()
 
-        trainer.log(
-            {
-                f"best_{metric_to_track}": trainer.model.config.to_dict().get(
-                    f"best_{metric_to_track}"
-                )
-            }
+        best_metric_score = trainer.model.config.to_dict().get(
+            f"best_{metric_to_track}"
         )
+        trainer.log({f"best_{metric_to_track}": best_metric_score})
         model.config.update({"wandb_id": wandb.run.id, "wandb_name": wandb.run.name})
         model.config.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
-            push_to_hub(trainer)
+            push_to_hub(
+                trainer,
+                config=cfg,
+                metrics={f"best_{metric_to_track}": best_metric_score},
+                wandb_run_id=wandb.run.id
+            )
 
         wandb.finish()
 
