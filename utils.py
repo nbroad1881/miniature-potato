@@ -1,8 +1,9 @@
 import os
 import re
 import yaml
+import json
 from pathlib import Path
-from bisect import bisect
+
 from itertools import chain
 from dataclasses import dataclass
 from typing import List, Any, Optional, Tuple
@@ -15,10 +16,11 @@ from transformers import (
     get_scheduler,
     PreTrainedTokenizerBase,
     DataCollatorForLanguageModeling,
-    DataCollatorForTokenClassification
+    DataCollatorForTokenClassification,
 )
 from transformers.utils import logging
 import bitsandbytes as bnb
+from modelcards import CardData, ModelCard
 
 logger = logging.get_logger(__name__)
 
@@ -74,45 +76,6 @@ def set_wandb_env_vars(cfg):
     os.environ["WANDB_JOB_TYPE"] = cfg.get("job_type", "")
     os.environ["WANDB_NOTES"] = cfg.get("notes", "")
     os.environ["WANDB_TAGS"] = ",".join(cfg.get("tags", ""))
-
-
-def ai4code_compute_metrics(eval_preds, eval_dataset):
-                            #val_ids, val_correct_order):
-    # val_ids is a list of lists of ids in the order given
-    # val_correct_order is a list of lists of ids in the correct order
-    
-    preds, bad_labels = eval_preds
-    
-    labels = eval_dataset["labels"]
-    
-    mask = bad_labels != -100
-    
-    preds = preds[mask].ravel()
-
-    mae = mean_absolute_error(preds, list(chain(*labels)))
-    
-    pred_ids = []
-    idx = 0
-    for cell_ids in eval_dataset["cell_ids"]:
-        num2add = len(cell_ids)
-        
-
-        temp_df = pd.DataFrame({
-            "scores": preds[idx:idx+num2add],
-            "cell_ids": cell_ids,
-        })
-        temp_df = temp_df.sort_values(by="scores")
-        pred_ids.append(temp_df["cell_ids"].tolist())
-        
-        
-        idx += num2add
-
-    kt = kendall_tau(pred_ids, eval_dataset["correct_order"])
-
-    return {
-        "mae": mae,
-        "kt": kt,
-    }
 
 
 def reinit_model_weights(model, n_layers, config):
@@ -277,82 +240,13 @@ def log_training_dynamics(
     logger.info(f"Training Dynamics logged to {epoch_file_name}")
 
 
-@dataclass
-class OnlyMaskingCollator(DataCollatorForLanguageModeling):
-    """
-    Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
-    are not all of the same length.
-    Args:
-        tokenizer ([`PreTrainedTokenizer`] or [`PreTrainedTokenizerFast`]):
-            The tokenizer used for encoding the data.
-        mlm (`bool`, *optional*, defaults to `True`):
-            Whether or not to use masked language modeling. If set to `False`, the labels are the same as the inputs
-            with the padding tokens ignored (by setting them to -100). Otherwise, the labels are -100 for non-masked
-            tokens and the value to predict for the masked token.
-        mlm_probability (`float`, *optional*, defaults to 0.15):
-            The probability with which to (randomly) mask tokens in the input, when `mlm` is set to `True`.
-        pad_to_multiple_of (`int`, *optional*):
-            If set will pad the sequence to a multiple of the provided value.
-        return_tensors (`str`):
-            The type of Tensor to return. Allowable values are "np", "pt" and "tf".
-    <Tip>
-    For best performance, this data collator should be used with a dataset having items that are dictionaries or
-    BatchEncoding, with the `"special_tokens_mask"` key, as returned by a [`PreTrainedTokenizer`] or a
-    [`PreTrainedTokenizerFast`] with the argument `return_special_tokens_mask=True`.
-    </Tip>"""
-
-    tokenizer: PreTrainedTokenizerBase
-    mlm: bool = True
-    mlm_probability: float = 0.15
-    pad_to_multiple_of: Optional[int] = None
-    return_tensors: str = "pt"
-
-    def torch_mask_tokens(
-        self, inputs: Any, special_tokens_mask: Optional[Any] = None
-    ) -> Tuple[Any, Any]:
-        """
-        Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
-        """
-        import torch
-
-        labels = inputs.clone()
-        # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
-        probability_matrix = torch.full(labels.shape, self.mlm_probability)
-        if special_tokens_mask is None:
-            special_tokens_mask = [
-                self.tokenizer.get_special_tokens_mask(
-                    val, already_has_special_tokens=True
-                )
-                for val in labels.tolist()
-            ]
-            special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
-        else:
-            special_tokens_mask = special_tokens_mask.bool()
-
-        probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100  # We only compute loss on masked tokens
-
-        # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-        # indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-        # inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
-        inputs[masked_indices] = self.tokenizer.convert_tokens_to_ids(
-            self.tokenizer.mask_token
-        )
-
-        # # 10% of the time, we replace masked input tokens with random word
-        # indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-        # random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
-        # inputs[indices_random] = random_words[indices_random]
-
-        # The rest of the time (10% of the time) we keep the masked input tokens unchanged
-        return inputs, labels
-
-
 def push_to_hub(
     trainer,
     commit_message: Optional[str] = "End of training",
     blocking: bool = True,
+    config: str = None,
+    metrics: dict = None,   
+    wandb_run_id: str = None,
     **kwargs,
 ) -> str:
     """
@@ -396,7 +290,10 @@ def push_to_hub(
     )
     # push separately the model card to be independant from the rest of the model
     if trainer.args.should_save:
-        trainer.create_model_card(model_name=model_name, **kwargs)
+        
+        model_card = create_model_card(config, metrics, wandb_run_id)
+        model_card.save(Path(trainer.args.output_dir)/"README.md")
+
         try:
             trainer.repo.push_to_hub(
                 commit_message="update model card README.md",
@@ -411,94 +308,28 @@ def push_to_hub(
     return git_head_commit_url
 
 
-def count_inversions(a):
-    inversions = 0
-    sorted_so_far = []
-    for i, u in enumerate(a):
-        j = bisect(sorted_so_far, u)
-        inversions += i - j
-        sorted_so_far.insert(j, u)
-    return inversions
-
-
-def kendall_tau(predictions, ground_truth):
-    total_inversions = 0
-    total_2max = 0  # twice the maximum possible inversions across all instances
-    for gt, pred in zip(ground_truth, predictions):
-        ranks = [
-            gt.index(x) for x in pred
-        ]  # rank predicted order in terms of ground truth
-        total_inversions += count_inversions(ranks)
-        n = len(gt)
-        total_2max += n * (n - 1)
-    return 1 - 4 * total_inversions / total_2max
-
-
-
-@dataclass
-class AI4CodeDataCollator(DataCollatorForTokenClassification):
+def create_model_card(config, metrics, wandb_run_id):
     """
-    Data collator that will dynamically pad the inputs received, as well as the labels.
-    Have to modify to make label tensors float and not int.
-    This must be used with the MaskingProbCallback that sets the environment
-    variable at the beginning and end of the training step. This callback ensures
-    that there is no masking done during evaluation.
+    config (Dict)
+    metrics (Dict)
+    wandb_run_id (str)
     """
 
-    tokenizer = None
-    padding = True
-    max_length = None
-    pad_to_multiple_of = None
-    label_pad_token_id = -100
-    return_tensors = "pt"
+    template_path = Path(__file__).resolve().parent / "modelcard_template.md"
 
-    def torch_call(self, features):
-        import torch
+    return ModelCard.from_template(
+        card_data=CardData(  # Card metadata object that will be converted to YAML block
+            language='en',
+            license='mit',
+            tags=['ai4code']+config["tags"],
+            datasets=config["dataset_name"],
+        ),
+        template_path=template_path, 
+        model_id=config["output"],  
+        dataset_name=config["dataset_name"], 
+        metrics=json.dumps(metrics, indent=4),
+        config=json.dumps(config, indent=4),
+        wandb_run_id=wandb_run_id,
+    )
 
-        label_name = "label" if "label" in features[0].keys() else "labels"
-        labels = [feature[label_name] for feature in features] if label_name in features[0].keys() else None
-        batch = self.tokenizer.pad(
-            features,
-            padding=self.padding,
-            max_length=self.max_length,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-            # Conversion to tensors will fail if we have labels as they are not of the same length yet.
-            return_tensors="pt" if labels is None else None,
-        )
-
-        if labels is None:
-            return batch
-
-        sequence_length = torch.tensor(batch["input_ids"]).shape[1]
-        padding_side = self.tokenizer.padding_side
-        if padding_side == "right":
-            batch[label_name] = [
-                list(label) + [self.label_pad_token_id] * (sequence_length - len(label)) for label in labels
-            ]
-        else:
-            batch[label_name] = [
-                [self.label_pad_token_id] * (sequence_length - len(label)) + list(label) for label in labels
-            ]
-
-        labels = torch.tensor(batch[label_name], dtype=torch.float32)
-        batch = {k: torch.tensor(v, dtype=torch.int64) for k, v in batch.items() if k != label_name}
-        batch[label_name] = labels
-        return batch
     
-#     def torch_call(self, features):
-#         label_name = "label" if "label" in features[0].keys() else "labels"
-        
-        
-        
-#         batch = super().torch_call(features)
-        
-
-#         batch[label_name] = batch[label_name].type(torch.float32)
-
-#         masking_prob = os.getenv("MASKING_PROB")
-#         if masking_prob is not None and masking_prob != "0":
-#             batch = self.mask_tokens(batch, float(masking_prob))
-            
-#         import pdb; pdb.set_trace()
-
-#         return batch
