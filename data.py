@@ -453,7 +453,7 @@ class NLIDataModule:
 
 
             # step by 3
-            for i in range(0, min(6, len(md_idxs)), 3):
+            for i in range(0, 12, 3):
                 
                 add_sample(i, rand_md_idxs, "a_then_b")
                 add_sample(i+1, rand_md_idxs, "b_then_a")
