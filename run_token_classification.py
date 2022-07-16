@@ -20,7 +20,7 @@ from utils import (
     push_to_hub,
 )
 from data import (
-    DataModule,
+    TokenClassificationDataModule,
     AI4CodeDataCollator,
 )
 from modeling import (
@@ -62,7 +62,7 @@ if __name__ == "__main__":
 
     cfg["output"] = output
     cfg["load_from_disk"] = load_from_disk
-    dm = DataModule(cfg)
+    dm = TokenClassificationDataModule(cfg)
 
     dm.prepare_datasets()
 
