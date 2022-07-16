@@ -333,11 +333,6 @@ class PredictFirstDataModule:
 class NLIDataModule:
 
     cfg: dict = None
-    label2idx: dict = {
-        "a_then_b": 0,
-        "b_then_a": 1,
-        "unrelated": 2,
-    }
 
     def __post_init__(self):
         if self.cfg is None:
@@ -350,6 +345,12 @@ class NLIDataModule:
             self.fold_idxs,
             self.ds,
         ) = setup_data(self.cfg)
+        
+        self.label2idx: dict = {
+            "a_then_b": 0,
+            "b_then_a": 1,
+            "unrelated": 2,
+        }
 
     def prepare_datasets(self):
 
@@ -388,7 +389,7 @@ class NLIDataModule:
 
     def tokenize(self, examples):
 
-        zipped = zip(examples["source"], examples["cell_type"], examples["correct_order"])
+        zipped = zip(examples["source"], examples["cell_type"], examples["correct_order"], examples["cell_ids"])
 
         labels = []
         texts = []
@@ -404,8 +405,8 @@ class NLIDataModule:
             md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
             code_idxs = np.argwhere(np.array(cell_type, dtype=object)=="code")
 
-            rand_md_idxs = np.random.choice(md_idxs, len(md_idxs))
-            rand_code_idxs = np.random.choice(code_idxs, len(code_idxs))
+            rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs))
+            rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs))
             
             used_ids = set()
             def add_sample(idx, rand_idxs, label):
