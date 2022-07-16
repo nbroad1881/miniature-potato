@@ -75,7 +75,7 @@ if __name__ == "__main__":
             return (a==b).astype(np.float32).mean().item()
 
         label_scores = {}
-        for label_name, val in dm.LABEL2IDX.items():
+        for label_name, val in dm.label2idx.items():
             label_scores[f"{label_name}_accuracy"] = get_acc(all_preds[labels==val], labels[labels==val])
 
 
@@ -122,9 +122,9 @@ if __name__ == "__main__":
         )
         model_config.update(
             {
-                "num_labels": len(dm.LABEL2IDX.values()),
-                "label2idx": dm.LABEL2IDX,
-                "idx2label": {v:k for k, v in dm.LABEL2IDX.items()},
+                "num_labels": len(dm.label2idx.values()),
+                "label2idx": dm.label2idx,
+                "idx2label": {v:k for k, v in dm.label2idx.items()},
                 # "attention_probs_dropout_prob": 0.0,
                 # "hidden_dropout_prob": 0.0,
                 # "multisample_dropout": cfg["multisample_dropout"],
