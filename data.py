@@ -19,10 +19,108 @@ from transformers import (
     PreTrainedTokenizerBase,
 )
 from datasets import Dataset, disable_progress_bar, load_dataset, load_from_disk
+            
+
+def setup_data(cfg):
+    data_dir = Path(cfg["data_dir"])
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        cfg["model_name_or_path"],
+        use_auth_token=os.environ.get("HUGGINGFACE_HUB_TOKEN", True),
+    )
+
+    if cfg["load_from_disk"]:
+        if cfg["load_from_disk"].endswith(".dataset"):
+            load_path = cfg["load_from_disk"][: -len(".dataset")]
+        else:
+            load_path = cfg["load_from_disk"]
+        ds = load_from_disk(f"{load_path}.dataset")
+
+        with open(f"{load_path}.pkl", "rb") as fp:
+            fold_idxs = pickle.load(fp)
+        print("Loading dataset from disk", cfg["load_from_disk"])
+        if cfg["DEBUG"]:
+            ds = ds.select(range(cfg["n_debug"]))
+
+        orders_ds = None
+    else:
+        orders_ds = load_dataset(
+            "csv", data_files=str(data_dir / "train_orders.csv"), split="train"
+        )
+
+        if cfg["DEBUG"]:
+            orders_ds = orders_ds.select(range(cfg["n_debug"]))
+
+        orders_ds = orders_ds.map(
+            lambda x: {"length": [len(x.split()) for x in x["cell_order"]]},
+            batched=True,
+            num_proc=cfg["num_proc"],
+            desc="Calculating length of cell orders",
+        )
+
+        fold_idxs = get_folds(
+            orders_ds.to_pandas(),
+            pd.read_csv(data_dir / "train_ancestors.csv"),
+            k_folds=cfg["k_folds"],
+            stratify_on=cfg["stratify_on"],
+            groups=cfg["fold_groups"],
+        )
+        ds = None
+
+    return data_dir, tokenizer, orders_ds, fold_idxs, ds
+
+
+def read_text_files(example, data_dir):
+
+    id_ = example["id"]
+
+    example["error"] = False
+
+    with open(data_dir / "train" / f"{id_}.json", "r") as fp:
+        data = json.load(fp)
+        try:
+            example["source"] = data["source"].values()
+            example["cell_type"] = data["cell_type"].values()
+
+            example["cell_ids"] = list(data["source"].keys())
+            example["correct_order"] = example["cell_order"].split()
+            cell_id2idx = {
+                cell_id: example["correct_order"].index(cell_id)
+                for cell_id in example["cell_ids"]
+            }
+
+            num_cells = len(example["cell_type"])
+            example["labels"] = [
+                cell_id2idx[cell_id] / num_cells for cell_id in data["source"].keys()
+            ]
+
+        except:
+            example["error"] = True
+
+    return example
+
+
+def get_folds(
+    orders_df, ancestors_df, k_folds=5, stratify_on="length", groups="ancestor_id"
+):
+
+    merged = orders_df.merge(ancestors_df, on="id", how="left")
+
+    if stratify_on and groups:
+        sgkf = StratifiedGroupKFold(n_splits=k_folds)
+        return [
+            val_idx
+            for _, val_idx in sgkf.split(
+                merged, y=merged[stratify_on].astype(str), groups=merged[groups]
+            )
+        ]
+
+    gkf = GroupKFold(n_splits=k_folds)
+    return [val_idx for _, val_idx in gkf.split(merged, groups=merged[groups])]
 
 
 @dataclass
-class DataModule:
+class TokenClassificationDataModule:
 
     cfg: dict = None
 
@@ -231,103 +329,150 @@ class PredictFirstDataModule:
         return tokenized
 
 
-def setup_data(cfg):
-    data_dir = Path(cfg["data_dir"])
+@dataclass
+class NLIDataModule:
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        cfg["model_name_or_path"],
-        use_auth_token=os.environ.get("HUGGINGFACE_HUB_TOKEN", True),
-    )
+    cfg: dict = None
+    LABEL2IDX: dict = {
+        "A_THEN_B": 0,
+        "B_THEN_A": 1,
+        "UNRELATED": 2,
+    }
 
-    if cfg["load_from_disk"]:
-        if cfg["load_from_disk"].endswith(".dataset"):
-            load_path = cfg["load_from_disk"][: -len(".dataset")]
-        else:
-            load_path = cfg["load_from_disk"]
-        ds = load_from_disk(f"{load_path}.dataset")
+    def __post_init__(self):
+        if self.cfg is None:
+            raise ValueError("Please provide a config file")
 
-        with open(f"{load_path}.pkl", "rb") as fp:
-            fold_idxs = pickle.load(fp)
-        print("Loading dataset from disk", cfg["load_from_disk"])
-        if cfg["DEBUG"]:
-            ds = ds.select(range(cfg["n_debug"]))
+        (
+            self.data_dir,
+            self.tokenizer,
+            self.orders_ds,
+            self.fold_idxs,
+            self.ds,
+        ) = setup_data(self.cfg)
 
-        orders_ds = None
-    else:
-        orders_ds = load_dataset(
-            "csv", data_files=str(data_dir / "train_orders.csv"), split="train"
-        )
+    def prepare_datasets(self):
 
-        if cfg["DEBUG"]:
-            orders_ds = orders_ds.select(range(cfg["n_debug"]))
+        if self.cfg["load_from_disk"] is None:
 
-        orders_ds = orders_ds.map(
-            lambda x: {"length": [len(x.split()) for x in x["cell_order"]]},
-            batched=True,
-            num_proc=cfg["num_proc"],
-            desc="Calculating length of cell orders",
-        )
-
-        fold_idxs = get_folds(
-            orders_ds.to_pandas(),
-            pd.read_csv(data_dir / "train_ancestors.csv"),
-            k_folds=cfg["k_folds"],
-            stratify_on=cfg["stratify_on"],
-            groups=cfg["fold_groups"],
-        )
-        ds = None
-
-    return data_dir, tokenizer, orders_ds, fold_idxs, ds
-
-
-def read_text_files(example, data_dir):
-
-    id_ = example["id"]
-
-    example["error"] = False
-
-    with open(data_dir / "train" / f"{id_}.json", "r") as fp:
-        data = json.load(fp)
-        try:
-            example["source"] = data["source"].values()
-            example["cell_type"] = data["cell_type"].values()
-
-            example["cell_ids"] = list(data["source"].keys())
-            example["correct_order"] = example["cell_order"].split()
-            cell_id2idx = {
-                cell_id: example["correct_order"].index(cell_id)
-                for cell_id in example["cell_ids"]
-            }
-
-            num_cells = len(example["cell_type"])
-            example["labels"] = [
-                cell_id2idx[cell_id] / num_cells for cell_id in data["source"].keys()
-            ]
-
-        except:
-            example["error"] = True
-
-    return example
-
-
-def get_folds(
-    orders_df, ancestors_df, k_folds=5, stratify_on="length", groups="ancestor_id"
-):
-
-    merged = orders_df.merge(ancestors_df, on="id", how="left")
-
-    if stratify_on and groups:
-        sgkf = StratifiedGroupKFold(n_splits=k_folds)
-        return [
-            val_idx
-            for _, val_idx in sgkf.split(
-                merged, y=merged[stratify_on].astype(str), groups=merged[groups]
+            self.ds = self.orders_ds.map(
+                read_text_files,
+                batched=False,
+                num_proc=self.cfg["num_proc"],
+                fn_kwargs={"data_dir": self.data_dir},
             )
-        ]
 
-    gkf = GroupKFold(n_splits=k_folds)
-    return [val_idx for _, val_idx in gkf.split(merged, groups=merged[groups])]
+            print(sum(self.ds["error"]), "errors")
 
+            self.ds = self.ds.map(
+                self.tokenize,
+                batched=True,
+                num_proc=self.cfg["num_proc"],
+                desc="Tokenizing",
+                remove_columns=self.ds.column_names
+            )
+
+            self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
+            with open(f"{self.cfg['output']}.pkl", "wb") as fp:
+                pickle.dump(self.fold_idxs, fp)
+
+            print("Saving dataset to disk:", self.cfg["output"])
+
+    def get_train_dataset(self, fold):
+        idxs = list(chain(*[i for f, i in enumerate(self.fold_idxs) if f != fold]))
+        return self.ds.select(idxs)
+
+    def get_eval_dataset(self, fold):
+        idxs = self.fold_idxs[fold]
+        return self.ds.select(idxs)
+
+    def tokenize(self, examples):
+
+        zipped = zip(examples["source"], examples["cell_type"], examples["correct_order"])
+
+        labels = []
+        texts = []
+        for source, cell_type, correct_order, ids in zipped:
+            """
+            source is list of str, in the order given (code first, md next (scrambled))
+            cell_type is list of str, in the order given (code first, md next (scrambled))
+            correct order is list of str of ids in the correct order
+            ids is list of str, in the order given (code first, md next (scrambled))
+            """
+            num_cells = len(source)
+
+            md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
+            code_idxs = np.argwhere(np.array(cell_type, dtype=object)=="code")
+
+            rand_md_idxs = np.random.choice(md_idxs, len(md_idxs))
+            rand_code_idxs = np.random.choice(code_idxs, len(code_idxs))
+            
+            used_ids = set()
+            def add_sample(idx, rand_idxs, label):
+                """
+                idx is for the array rand_idxs.
+                rand_idxs maps to idxs in `ids`.
+                    rand_idxs is specific to code or md
+
+                """
+                if idx >= len(rand_idxs):
+                    return None
+
+                # current_id is the id of current cell
+                current_given_idx = rand_idxs[idx]
+                current_id = ids[current_given_idx]
+                true_idx = correct_order.index(current_id)
+
+                if label == "A_THEN_B":
+                    if true_idx + 1 >= num_cells:
+                        return None
+                    second_idx = true_idx + 1
+                elif label == "B_THEN_A":
+                    if true_idx == 0:
+                        return None
+                    second_idx = true_idx - 1
+                else:
+                    if num_cells == 1:
+                        return None
+                    other = np.random.randint(low=0, high=num_cells, size=1)
+                    while other.item() == true_idx:
+                         other = np.random.randint(low=0, high=num_cells, size=1)
+                    second_idx = other.item()
+
+                second_id = correct_order[second_idx]
+
+                if current_id in used_ids or second_id in used_ids:
+                    return None
+                used_ids.update([current_id, second_id])
+
+                second_given_idx = ids.index(second_id)
+
+                texts.append((source[current_given_idx], source[second_given_idx]))
+                labels.append(self.LABEL2IDX[label])
+
+
+            # step by 3
+            for i in range(0, min(6, len(md_idxs)), 3):
+                
+                add_sample(i, rand_md_idxs, "A_THEN_B")
+                add_sample(i+1, rand_md_idxs, "B_THEN_A")
+                add_sample(i+2, rand_md_idxs, "UNRELATED")
+
+                add_sample(i, rand_code_idxs, "A_THEN_B")
+                add_sample(i+1, rand_code_idxs, "B_THEN_A")
+                add_sample(i+2, rand_code_idxs, "UNRELATED")
+
+
+        tokenized = self.tokenizer(
+            texts,
+            padding=False,
+            truncation="longest_first",
+            max_length=self.cfg["max_length"]
+        )
+
+        tokenized["labels"] = labels
+
+        return tokenized
 
 @dataclass
 class OnlyMaskingCollator(DataCollatorForLanguageModeling):
