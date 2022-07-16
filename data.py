@@ -333,10 +333,10 @@ class PredictFirstDataModule:
 class NLIDataModule:
 
     cfg: dict = None
-    LABEL2IDX: dict = {
-        "A_THEN_B": 0,
-        "B_THEN_A": 1,
-        "UNRELATED": 2,
+    label2idx: dict = {
+        "a_then_b": 0,
+        "b_then_a": 1,
+        "unrelated": 2,
     }
 
     def __post_init__(self):
@@ -423,11 +423,11 @@ class NLIDataModule:
                 current_id = ids[current_given_idx]
                 true_idx = correct_order.index(current_id)
 
-                if label == "A_THEN_B":
+                if label == "a_then_b":
                     if true_idx + 1 >= num_cells:
                         return None
                     second_idx = true_idx + 1
-                elif label == "B_THEN_A":
+                elif label == "b_then_a":
                     if true_idx == 0:
                         return None
                     second_idx = true_idx - 1
@@ -448,19 +448,19 @@ class NLIDataModule:
                 second_given_idx = ids.index(second_id)
 
                 texts.append((source[current_given_idx], source[second_given_idx]))
-                labels.append(self.LABEL2IDX[label])
+                labels.append(self.label2idx[label])
 
 
             # step by 3
             for i in range(0, min(6, len(md_idxs)), 3):
                 
-                add_sample(i, rand_md_idxs, "A_THEN_B")
-                add_sample(i+1, rand_md_idxs, "B_THEN_A")
-                add_sample(i+2, rand_md_idxs, "UNRELATED")
+                add_sample(i, rand_md_idxs, "a_then_b")
+                add_sample(i+1, rand_md_idxs, "b_then_a")
+                add_sample(i+2, rand_md_idxs, "unrelated")
 
-                add_sample(i, rand_code_idxs, "A_THEN_B")
-                add_sample(i+1, rand_code_idxs, "B_THEN_A")
-                add_sample(i+2, rand_code_idxs, "UNRELATED")
+                add_sample(i, rand_code_idxs, "a_then_b")
+                add_sample(i+1, rand_code_idxs, "b_then_a")
+                add_sample(i+2, rand_code_idxs, "unrelated")
 
 
         tokenized = self.tokenizer(
