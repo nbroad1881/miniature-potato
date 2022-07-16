@@ -21,8 +21,6 @@ from utils import (
     get_configs,
     set_wandb_env_vars,
     reinit_model_weights,
-    create_optimizer,
-    create_scheduler,
     push_to_hub,
 )
 
