@@ -114,6 +114,10 @@ if __name__ == "__main__":
             "Decode inputs from train_dataset",
             dm.tokenizer.convert_ids_to_tokens(train_dataset[0]["input_ids"]),
         )
+        print(
+            "Decode inputs from train_dataset",
+            dm.tokenizer.decode(train_dataset[0]["input_ids"]),
+        )
 
 
         model_config = AutoConfig.from_pretrained(
