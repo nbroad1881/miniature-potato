@@ -33,7 +33,6 @@ def parse_args():
     parser.add_argument(
         "config_file",
         type=str,
-        required=True,
         help="Config file",
     )
     parser.add_argument(
