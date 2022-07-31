@@ -19,7 +19,7 @@ from transformers import (
     PreTrainedTokenizerBase,
 )
 from datasets import Dataset, disable_progress_bar, load_dataset, load_from_disk
-            
+
 
 def setup_data(cfg):
     data_dir = Path(cfg["data_dir"])
@@ -285,7 +285,7 @@ class PredictFirstDataModule:
                 batched=True,
                 num_proc=self.cfg["num_proc"],
                 desc="Tokenizing",
-                remove_columns=self.ds.column_names
+                remove_columns=self.ds.column_names,
             )
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
@@ -311,17 +311,16 @@ class PredictFirstDataModule:
         texts = []
         for source, cell_type, labels in zipped:
             true_first_idx = labels.index(0.0)
-            md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
-            idxs = list(set([0,true_first_idx]+list(np.random.choice(md_idxs.ravel(), 3))))
-            
-            all_labels.extend([1 if i==true_first_idx else 0 for i in idxs ])
+            md_idxs = np.argwhere(np.array(cell_type, dtype=object) == "markdown")
+            idxs = list(
+                set([0, true_first_idx] + list(np.random.choice(md_idxs.ravel(), 3)))
+            )
+
+            all_labels.extend([1 if i == true_first_idx else 0 for i in idxs])
             texts.extend([source[i] for i in idxs])
 
         tokenized = self.tokenizer(
-            texts,
-            padding=False,
-            truncation=True,
-            max_length=self.cfg["max_length"]
+            texts, padding=False, truncation=True, max_length=self.cfg["max_length"]
         )
 
         tokenized["labels"] = all_labels
@@ -345,7 +344,7 @@ class NLIDataModule:
             self.fold_idxs,
             self.ds,
         ) = setup_data(self.cfg)
-        
+
         self.label2idx: dict = {
             "a_then_b": 0,
             "b_then_a": 1,
@@ -370,7 +369,7 @@ class NLIDataModule:
                 batched=True,
                 num_proc=self.cfg["num_proc"],
                 desc="Tokenizing",
-                remove_columns=self.ds.column_names
+                remove_columns=self.ds.column_names,
             )
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
@@ -389,7 +388,12 @@ class NLIDataModule:
 
     def tokenize(self, examples):
 
-        zipped = zip(examples["source"], examples["cell_type"], examples["correct_order"], examples["cell_ids"])
+        zipped = zip(
+            examples["source"],
+            examples["cell_type"],
+            examples["correct_order"],
+            examples["cell_ids"],
+        )
 
         labels = []
         texts = []
@@ -402,13 +406,14 @@ class NLIDataModule:
             """
             num_cells = len(source)
 
-            md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
-            code_idxs = np.argwhere(np.array(cell_type, dtype=object)=="code")
+            md_idxs = np.argwhere(np.array(cell_type, dtype=object) == "markdown")
+            code_idxs = np.argwhere(np.array(cell_type, dtype=object) == "code")
 
             rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs))
             rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs))
-            
+
             used_ids = set()
+
             def add_sample(idx, rand_idxs, label):
                 """
                 idx is for the array rand_idxs.
@@ -442,7 +447,7 @@ class NLIDataModule:
                             break
                     if other.item() == true_idx:
                         return None
-                         
+
                     second_idx = other.item()
 
                 second_id = correct_order[second_idx]
@@ -456,24 +461,22 @@ class NLIDataModule:
                 texts.append((source[current_given_idx], source[second_given_idx]))
                 labels.append(self.label2idx[label])
 
-
             # step by 3
             for i in range(0, 9, 3):
-                
+
                 add_sample(i, rand_md_idxs, "a_then_b")
-                add_sample(i+1, rand_md_idxs, "b_then_a")
-                add_sample(i+2, rand_md_idxs, "unrelated")
+                add_sample(i + 1, rand_md_idxs, "b_then_a")
+                add_sample(i + 2, rand_md_idxs, "unrelated")
 
                 add_sample(i, rand_code_idxs, "a_then_b")
-                add_sample(i+1, rand_code_idxs, "b_then_a")
-                add_sample(i+2, rand_code_idxs, "unrelated")
-
+                add_sample(i + 1, rand_code_idxs, "b_then_a")
+                add_sample(i + 2, rand_code_idxs, "unrelated")
 
         tokenized = self.tokenizer(
             texts,
             padding=False,
             truncation="longest_first",
-            max_length=self.cfg["max_length"]
+            max_length=self.cfg["max_length"],
         )
 
         tokenized["labels"] = labels
@@ -497,11 +500,21 @@ class SwapDataModule:
             self.fold_idxs,
             self.ds,
         ) = setup_data(self.cfg)
-        
+
         self.label2idx: dict = {
             "swap": 0,
             "no_swap": 1,
         }
+
+        temp_folds = [set(x) for x in self.fold_idxs]
+
+        def add_folds(example, idx):
+            for i, idxs in enumerate(temp_folds):
+                if idx in idxs:
+                    return {"fold": i}
+            return {"fold": -1}
+        
+        self.orders_ds = self.orders_ds.map(add_folds, with_indices=True, num_proc=self.cfg["num_proc"])
 
     def prepare_datasets(self):
 
@@ -519,10 +532,15 @@ class SwapDataModule:
             self.ds = self.ds.map(
                 self.tokenize,
                 batched=True,
+                batch_size=500,
                 num_proc=self.cfg["num_proc"],
                 desc="Tokenizing",
-                remove_columns=self.ds.column_names
+                remove_columns=self.ds.column_names,
             )
+            self.fold_idxs = [[]]*self.cfg["k_folds"]
+            
+            for idx, f in enumerate(self.ds["fold"]):
+                self.fold_idxs[f].append(idx)
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
             with open(f"{self.cfg['output']}.pkl", "wb") as fp:
@@ -540,11 +558,19 @@ class SwapDataModule:
 
     def tokenize(self, examples):
 
-        zipped = zip(examples["source"], examples["cell_type"], examples["correct_order"], examples["cell_ids"])
+        zipped = zip(
+            examples["source"],
+            examples["cell_type"],
+            examples["correct_order"],
+            examples["cell_ids"],
+            examples["fold"]
+        )
 
         labels = []
-        texts = []
-        for source, cell_type, correct_order, ids in zipped:
+        texts1 = []
+        texts2 = []
+        folds = []
+        for source, cell_type, correct_order, ids, fold in zipped:
             """
             source is list of str, in the order given (code first, md next (scrambled))
             cell_type is list of str, in the order given (code first, md next (scrambled))
@@ -553,13 +579,14 @@ class SwapDataModule:
             """
             num_cells = len(source)
 
-            md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
-            code_idxs = np.argwhere(np.array(cell_type, dtype=object)=="code")
+            md_idxs = np.argwhere(np.array(cell_type, dtype=object) == "markdown")
+            code_idxs = np.argwhere(np.array(cell_type, dtype=object) == "code")
 
             rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs))
             rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs))
-            
+
             used_ids = set()
+
             def add_sample(idx, rand_idxs, label):
                 """
                 idx is for the array rand_idxs.
@@ -594,32 +621,33 @@ class SwapDataModule:
 
                 second_given_idx = ids.index(second_id)
 
-                texts.append((source[current_given_idx], source[second_given_idx]))
+                texts1.append(source[current_given_idx])
+                texts2.append(source[second_given_idx])
                 labels.append(self.label2idx[label])
+                folds.append(fold)
 
+            # step by 2
+            for i in range(0, 2, 2):
 
-            # step by 3
-            for i in range(0, 6, 3):
-                
                 add_sample(i, rand_md_idxs, "swap")
-                add_sample(i+1, rand_md_idxs, "swap")
-                add_sample(i+2, rand_md_idxs, "swap")
+                add_sample(i + 1, rand_md_idxs, "no_swap")
 
-                add_sample(i, rand_code_idxs, "no_swap")
-                add_sample(i+1, rand_code_idxs, "no_swap")
-                add_sample(i+2, rand_code_idxs, "no_swap")
-
+                add_sample(i, rand_code_idxs, "swap")
+                add_sample(i + 1, rand_code_idxs, "no_swap")
 
         tokenized = self.tokenizer(
-            texts,
+            texts1,
+            texts2,
             padding=False,
             truncation="longest_first",
-            max_length=self.cfg["max_length"]
+            max_length=self.cfg["max_length"],
         )
 
         tokenized["labels"] = labels
+        tokenized["fold"] = folds
 
         return tokenized
+
 
 @dataclass
 class OnlyMaskingCollator(DataCollatorForLanguageModeling):
