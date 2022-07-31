@@ -436,8 +436,13 @@ class NLIDataModule:
                     if num_cells == 1:
                         return None
                     other = np.random.randint(low=0, high=num_cells, size=1)
-                    while other.item() == true_idx:
-                         other = np.random.randint(low=0, high=num_cells, size=1)
+                    for i in range(5):
+                        other = np.random.randint(low=0, high=num_cells, size=1)
+                        if other.item() != true_idx:
+                            break
+                    if other.item() == true_idx:
+                        return None
+                         
                     second_idx = other.item()
 
                 second_id = correct_order[second_idx]
@@ -453,7 +458,7 @@ class NLIDataModule:
 
 
             # step by 3
-            for i in range(0, 12, 3):
+            for i in range(0, 9, 3):
                 
                 add_sample(i, rand_md_idxs, "a_then_b")
                 add_sample(i+1, rand_md_idxs, "b_then_a")

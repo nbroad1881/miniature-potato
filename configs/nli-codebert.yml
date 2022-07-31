@@ -1,6 +1,6 @@
 # RunArguments
 DEBUG: yes
-n_debug: 75000
+n_debug: 50000
 n_gpu: 1
 num_proc: 7
 
@@ -70,7 +70,7 @@ training_arguments:
   seed: 18
 
 # hyperparams
-  per_device_train_batch_size: 64
+  per_device_train_batch_size: 32
   gradient_accumulation_steps: 1
   gradient_checkpointing: no
   group_by_length: yes
