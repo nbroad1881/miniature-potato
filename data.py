@@ -480,6 +480,147 @@ class NLIDataModule:
 
         return tokenized
 
+
+@dataclass
+class SwapDataModule:
+
+    cfg: dict = None
+
+    def __post_init__(self):
+        if self.cfg is None:
+            raise ValueError("Please provide a config file")
+
+        (
+            self.data_dir,
+            self.tokenizer,
+            self.orders_ds,
+            self.fold_idxs,
+            self.ds,
+        ) = setup_data(self.cfg)
+        
+        self.label2idx: dict = {
+            "swap": 0,
+            "no_swap": 1,
+        }
+
+    def prepare_datasets(self):
+
+        if self.cfg["load_from_disk"] is None:
+
+            self.ds = self.orders_ds.map(
+                read_text_files,
+                batched=False,
+                num_proc=self.cfg["num_proc"],
+                fn_kwargs={"data_dir": self.data_dir},
+            )
+
+            print(sum(self.ds["error"]), "errors")
+
+            self.ds = self.ds.map(
+                self.tokenize,
+                batched=True,
+                num_proc=self.cfg["num_proc"],
+                desc="Tokenizing",
+                remove_columns=self.ds.column_names
+            )
+
+            self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
+            with open(f"{self.cfg['output']}.pkl", "wb") as fp:
+                pickle.dump(self.fold_idxs, fp)
+
+            print("Saving dataset to disk:", self.cfg["output"])
+
+    def get_train_dataset(self, fold):
+        idxs = list(chain(*[i for f, i in enumerate(self.fold_idxs) if f != fold]))
+        return self.ds.select(idxs)
+
+    def get_eval_dataset(self, fold):
+        idxs = self.fold_idxs[fold]
+        return self.ds.select(idxs)
+
+    def tokenize(self, examples):
+
+        zipped = zip(examples["source"], examples["cell_type"], examples["correct_order"], examples["cell_ids"])
+
+        labels = []
+        texts = []
+        for source, cell_type, correct_order, ids in zipped:
+            """
+            source is list of str, in the order given (code first, md next (scrambled))
+            cell_type is list of str, in the order given (code first, md next (scrambled))
+            correct order is list of str of ids in the correct order
+            ids is list of str, in the order given (code first, md next (scrambled))
+            """
+            num_cells = len(source)
+
+            md_idxs = np.argwhere(np.array(cell_type, dtype=object)=="markdown")
+            code_idxs = np.argwhere(np.array(cell_type, dtype=object)=="code")
+
+            rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs))
+            rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs))
+            
+            used_ids = set()
+            def add_sample(idx, rand_idxs, label):
+                """
+                idx is for the array rand_idxs.
+                rand_idxs maps to idxs in `ids`.
+                    rand_idxs is specific to code or md
+
+                """
+                if idx >= len(rand_idxs):
+                    return None
+
+                # current_id is the id of current cell
+                current_given_idx = rand_idxs[idx]
+                current_id = ids[current_given_idx]
+                true_idx = correct_order.index(current_id)
+
+                if label == "no_swap":
+                    if true_idx + 1 >= num_cells:
+                        return None
+                    second_idx = true_idx + 1
+                elif label == "swap":
+                    if true_idx == 0:
+                        return None
+
+                    second_idx = true_idx - 1
+                    # second_idx = np.random.randint(low=0, high=true_idx, size=1).item()
+
+                second_id = correct_order[second_idx]
+
+                if current_id in used_ids or second_id in used_ids:
+                    return None
+                used_ids.update([current_id, second_id])
+
+                second_given_idx = ids.index(second_id)
+
+                texts.append((source[current_given_idx], source[second_given_idx]))
+                labels.append(self.label2idx[label])
+
+
+            # step by 3
+            for i in range(0, 6, 3):
+                
+                add_sample(i, rand_md_idxs, "swap")
+                add_sample(i+1, rand_md_idxs, "swap")
+                add_sample(i+2, rand_md_idxs, "swap")
+
+                add_sample(i, rand_code_idxs, "no_swap")
+                add_sample(i+1, rand_code_idxs, "no_swap")
+                add_sample(i+2, rand_code_idxs, "no_swap")
+
+
+        tokenized = self.tokenizer(
+            texts,
+            padding=False,
+            truncation="longest_first",
+            max_length=self.cfg["max_length"]
+        )
+
+        tokenized["labels"] = labels
+
+        return tokenized
+
 @dataclass
 class OnlyMaskingCollator(DataCollatorForLanguageModeling):
     """

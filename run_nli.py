@@ -15,7 +15,7 @@ from transformers import (
 from transformers.integrations import WandbCallback
 
 
-from data import NLIDataModule
+from data import NLIDataModule, SwapDataModule
 from callbacks import NewWandbCB, SaveCallback
 from utils import (
     get_configs,
@@ -31,12 +31,13 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune on AI4Code dataset")
     parser.add_argument(
-        "--config_file",
+        "config_file",
         type=str,
         required=True,
         help="Config file",
     )
     parser.add_argument(
+        "-l",
         "--load_from_disk",
         type=str,
         required=False,
@@ -59,7 +60,11 @@ if __name__ == "__main__":
 
     cfg["output"] = output
     cfg["load_from_disk"] = load_from_disk
-    dm = NLIDataModule(cfg)
+
+    if cfg["nli"]:
+        dm = NLIDataModule(cfg)
+    elif cfg["swap"]:
+        dm = SwapDataModule(cfg)
 
     dm.prepare_datasets()
 
