@@ -1,6 +1,6 @@
 # RunArguments
 DEBUG: yes
-n_debug: 25000
+n_debug: 30000
 n_gpu: 1
 num_proc: 7
 
@@ -129,7 +129,7 @@ training_arguments:
   do_predict:
   
 # hub
-  push_to_hub: yes
+  push_to_hub: no
   hub_model_id:
   hub_strategy: "every_save"
   hub_token:

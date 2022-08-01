@@ -537,10 +537,14 @@ class SwapDataModule:
                 desc="Tokenizing",
                 remove_columns=self.ds.column_names,
             )
-            self.fold_idxs = [[]]*self.cfg["k_folds"]
+            self.temp_fold_idxs = {f: [] for f in range(self.cfg["k_folds"])}
             
             for idx, f in enumerate(self.ds["fold"]):
-                self.fold_idxs[f].append(idx)
+                self.temp_fold_idxs[f].append(idx)
+                
+            for f, vals in self.temp_fold_idxs.items():
+                self.fold_idxs[f] = vals
+                
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
             with open(f"{self.cfg['output']}.pkl", "wb") as fp:
@@ -582,18 +586,25 @@ class SwapDataModule:
             md_idxs = np.argwhere(np.array(cell_type, dtype=object) == "markdown")
             code_idxs = np.argwhere(np.array(cell_type, dtype=object) == "code")
 
-            rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs))
-            rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs))
+            rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs), replace=False)
+            rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs), replace=False)
 
             used_ids = set()
 
-            def add_sample(idx, rand_idxs, label):
+            def add_sample(idx, md_or_code, label):
                 """
                 idx is for the array rand_idxs.
                 rand_idxs maps to idxs in `ids`.
                     rand_idxs is specific to code or md
 
                 """
+                if md_or_code == "markdown":
+                    rand_idxs  = rand_md_idxs
+                    other_idxs = rand_code_idxs
+                else:
+                    rand_idxs  = rand_code_idxs
+                    other_idxs  = rand_md_idxs
+                    
                 if idx >= len(rand_idxs):
                     return None
 
@@ -605,13 +616,36 @@ class SwapDataModule:
                 if label == "no_swap":
                     if true_idx + 1 >= num_cells:
                         return None
+                    
+                    # if np.random.uniform() > 0.5:
                     second_idx = true_idx + 1
+#                     else:
+#                         # Try 5 times to find a cell after this one that is of opposite cell type
+#                         for i in range(5):
+#                             second_idx = np.random.randint(low=true_idx, high=num_cells)
+
+#                             if cell_type[ids.index(correct_order[second_idx])] != md_or_code:
+#                                 break
+
+#                         if cell_type[ids.index(correct_order[second_idx])] == md_or_code:
+#                             return None
+                            
                 elif label == "swap":
                     if true_idx == 0:
                         return None
 
+                    # if np.random.uniform() > 0.5:
                     second_idx = true_idx - 1
-                    # second_idx = np.random.randint(low=0, high=true_idx, size=1).item()
+#                     else:
+#                         # Try 5 times to find a cell after this one that is of opposite cell type
+#                         for i in range(5):
+#                             second_idx = np.random.randint(low=0, high=true_idx)
+
+#                             if cell_type[ids.index(correct_order[second_idx])] != md_or_code:
+#                                 break
+
+#                         if cell_type[ids.index(correct_order[second_idx])] == md_or_code:
+#                             return None
 
                 second_id = correct_order[second_idx]
 
@@ -629,11 +663,11 @@ class SwapDataModule:
             # step by 2
             for i in range(0, 2, 2):
 
-                add_sample(i, rand_md_idxs, "swap")
-                add_sample(i + 1, rand_md_idxs, "no_swap")
+                add_sample(i, "markdown", "swap")
+                add_sample(i + 1, "markdown", "no_swap")
 
-                add_sample(i, rand_code_idxs, "swap")
-                add_sample(i + 1, rand_code_idxs, "no_swap")
+                add_sample(i, "code", "swap")
+                add_sample(i + 1, "code", "no_swap")
 
         tokenized = self.tokenizer(
             texts1,
