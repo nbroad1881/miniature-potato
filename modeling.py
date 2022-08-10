@@ -32,9 +32,7 @@ class AI4CodeModel(PreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, 1)
         self._init_weights(self.classifier)
 
-        self.loss_fct = nn.L1Loss()
-
-        self.cls_token_ids = list(config.cls_token_map.values())
+        self.cls_token_ids = torch.tensor(list(config.cls_token_map.values()))
 
 
     def forward(
@@ -56,22 +54,22 @@ class AI4CodeModel(PreTrainedModel):
             **kwargs,
         )[0]
 
-        mask = torch.logical_or(*[input_ids == id_ for id_ in self.cls_token_ids])
+        mask = torch.isin(input_ids, self.cls_token_ids.to(input_ids.device))
         # import pdb; pdb.set_trace()
         loss = None
         if labels is not None:
 
             labels = labels[labels > -1]
             
-
+            loss_fct = nn.L1Loss()
 
             if self.config.multisample_dropout:
-                loss, logits = self.multisample_dropout(outputs, self.classifier, labels, self.loss_fct, self.ln, mask)
+                loss, logits = self.multisample_dropout(outputs, self.classifier, labels, loss_fct, self.ln, mask)
             else:
 
                 logits = self.classifier(self.ln(self.dropout(outputs)))
 
-                loss = self.loss_fct(logits[mask].view(-1), labels.view(-1))
+                loss = loss_fct(logits[mask].view(-1), labels.view(-1))
 
         else:
             logits = self.classifier(self.ln(outputs))
