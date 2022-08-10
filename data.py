@@ -101,10 +101,13 @@ def read_text_files(example, data_dir):
 
 
 def get_folds(
-    orders_df, ancestors_df, k_folds=5, stratify_on="length", groups="ancestor_id"
+    orders_df, ancestors_df, k_folds=5, stratify_on="length_bin", groups="ancestor_id"
 ):
 
     merged = orders_df.merge(ancestors_df, on="id", how="left")
+    merged["length_bin"] = pd.cut(
+        merged["length"], k_folds, labels=list(range(k_folds))
+    )
 
     if stratify_on and groups:
         sgkf = StratifiedGroupKFold(n_splits=k_folds)
@@ -136,14 +139,19 @@ class TokenClassificationDataModule:
             self.ds,
         ) = setup_data(self.cfg)
 
-        cls_tkn_map = {"code": "[CLS_CODE]", "markdown": "[CLS_MARKDOWN]"}
+        self.cls_tkn_map = {
+            "code": "[CLS_CODE]",
+            "markdown": "[CLS_MARKDOWN]",
+            # end code
+            # end md
+        }
 
         self.tokenizer.add_special_tokens(
-            {"additional_special_tokens": list(cls_tkn_map.values())}
+            {"additional_special_tokens": list(self.cls_tkn_map.values())}
         )
         self.cls_id_map = {
-            "code": self.tokenizer.encode(cls_tkn_map["code"])[1],
-            "markdown": self.tokenizer.encode(cls_tkn_map["markdown"])[1],
+            "code": self.tokenizer.encode(self.cls_tkn_map["code"])[1],
+            "markdown": self.tokenizer.encode(self.cls_tkn_map["markdown"])[1],
         }
 
     def prepare_datasets(self):
@@ -200,34 +208,49 @@ class TokenClassificationDataModule:
             add_special_tokens=True,
         )
 
-        total_tokens = len(list(chain(*tokenized["input_ids"])))
+        num_code_cells = sum([x == "code" for x in example["cell_type"]])
+        num_md_cells = len(example["cell_type"]) - num_code_cells
+
+        num_code_tokens = len(
+            list(chain(*[x for x in tokenized["input_ids"][:num_code_cells]]))
+        )
+        num_md_tokens = len(
+            list(chain(*[x for x in tokenized["input_ids"][num_code_cells:]]))
+        )
+        total_tokens = num_code_tokens + num_md_tokens
 
         # get rid of first cls and last eos
         input_ids = [x[1:-1] for x in tokenized["input_ids"]]
 
         new_ids = []
         max_length = self.cfg["max_length"]
+        num_code_tokens_per_cell = 24
+        num_md_tokens_per_cell = None
+
+        # If the total number of tokens is more than limit
         if total_tokens > (max_length - len(example["source"])):
-            markdown_idxs = set(
-                [
-                    i
-                    for i, cell_type in enumerate(example["cell_type"])
-                    if cell_type == "markdown"
-                ]
-            )
-            markdown_length = len(
-                list(
-                    chain(
-                        [
-                            x
-                            for i, x in enumerate(tokenized["input_ids"])
-                            if i in markdown_idxs
-                        ]
-                    )
-                )
-            )
-            chunk_size = (max_length - len(example["source"])) // len(example["source"])
-            new_ids = [x[:chunk_size] for x in input_ids]
+
+            # If there are more markdown tokens than acceptable
+            if num_md_tokens > (
+                max_length
+                - len(example["source"])
+                - num_code_cells * num_code_tokens_per_cell
+            ):
+                num_md_tokens_per_cell = (
+                    max_length
+                    - len(example["source"])
+                    - num_code_cells * num_code_tokens_per_cell
+                ) // num_md_cells
+
+            for ids, cell_type in zip(input_ids, example["cell_type"]):
+                if cell_type == "markdown":
+                    if num_md_tokens_per_cell:
+                        new_ids.append(ids[:num_md_tokens_per_cell])
+                    else:
+                        new_ids.append(ids)
+                if cell_type == "code":
+                    new_ids.append(ids[:num_code_tokens_per_cell])
+
             return {"input_id_list": new_ids}
 
         return {"input_id_list": input_ids}
@@ -513,8 +536,10 @@ class SwapDataModule:
                 if idx in idxs:
                     return {"fold": i}
             return {"fold": -1}
-        
-        self.orders_ds = self.orders_ds.map(add_folds, with_indices=True, num_proc=self.cfg["num_proc"])
+
+        self.orders_ds = self.orders_ds.map(
+            add_folds, with_indices=True, num_proc=self.cfg["num_proc"]
+        )
 
     def prepare_datasets(self):
 
@@ -538,13 +563,12 @@ class SwapDataModule:
                 remove_columns=self.ds.column_names,
             )
             self.temp_fold_idxs = {f: [] for f in range(self.cfg["k_folds"])}
-            
+
             for idx, f in enumerate(self.ds["fold"]):
                 self.temp_fold_idxs[f].append(idx)
-                
+
             for f, vals in self.temp_fold_idxs.items():
                 self.fold_idxs[f] = vals
-                
 
             self.ds.save_to_disk(f"{self.cfg['output']}.dataset")
             with open(f"{self.cfg['output']}.pkl", "wb") as fp:
@@ -567,7 +591,7 @@ class SwapDataModule:
             examples["cell_type"],
             examples["correct_order"],
             examples["cell_ids"],
-            examples["fold"]
+            examples["fold"],
         )
 
         labels = []
@@ -586,8 +610,12 @@ class SwapDataModule:
             md_idxs = np.argwhere(np.array(cell_type, dtype=object) == "markdown")
             code_idxs = np.argwhere(np.array(cell_type, dtype=object) == "code")
 
-            rand_md_idxs = np.random.choice(md_idxs.ravel(), len(md_idxs), replace=False)
-            rand_code_idxs = np.random.choice(code_idxs.ravel(), len(code_idxs), replace=False)
+            rand_md_idxs = np.random.choice(
+                md_idxs.ravel(), len(md_idxs), replace=False
+            )
+            rand_code_idxs = np.random.choice(
+                code_idxs.ravel(), len(code_idxs), replace=False
+            )
 
             used_ids = set()
 
@@ -599,12 +627,12 @@ class SwapDataModule:
 
                 """
                 if md_or_code == "markdown":
-                    rand_idxs  = rand_md_idxs
+                    rand_idxs = rand_md_idxs
                     other_idxs = rand_code_idxs
                 else:
-                    rand_idxs  = rand_code_idxs
-                    other_idxs  = rand_md_idxs
-                    
+                    rand_idxs = rand_code_idxs
+                    other_idxs = rand_md_idxs
+
                 if idx >= len(rand_idxs):
                     return None
 
@@ -616,36 +644,36 @@ class SwapDataModule:
                 if label == "no_swap":
                     if true_idx + 1 >= num_cells:
                         return None
-                    
+
                     # if np.random.uniform() > 0.5:
                     second_idx = true_idx + 1
-#                     else:
-#                         # Try 5 times to find a cell after this one that is of opposite cell type
-#                         for i in range(5):
-#                             second_idx = np.random.randint(low=true_idx, high=num_cells)
+                #                     else:
+                #                         # Try 5 times to find a cell after this one that is of opposite cell type
+                #                         for i in range(5):
+                #                             second_idx = np.random.randint(low=true_idx, high=num_cells)
 
-#                             if cell_type[ids.index(correct_order[second_idx])] != md_or_code:
-#                                 break
+                #                             if cell_type[ids.index(correct_order[second_idx])] != md_or_code:
+                #                                 break
 
-#                         if cell_type[ids.index(correct_order[second_idx])] == md_or_code:
-#                             return None
-                            
+                #                         if cell_type[ids.index(correct_order[second_idx])] == md_or_code:
+                #                             return None
+
                 elif label == "swap":
                     if true_idx == 0:
                         return None
 
                     # if np.random.uniform() > 0.5:
                     second_idx = true_idx - 1
-#                     else:
-#                         # Try 5 times to find a cell after this one that is of opposite cell type
-#                         for i in range(5):
-#                             second_idx = np.random.randint(low=0, high=true_idx)
+                #                     else:
+                #                         # Try 5 times to find a cell after this one that is of opposite cell type
+                #                         for i in range(5):
+                #                             second_idx = np.random.randint(low=0, high=true_idx)
 
-#                             if cell_type[ids.index(correct_order[second_idx])] != md_or_code:
-#                                 break
+                #                             if cell_type[ids.index(correct_order[second_idx])] != md_or_code:
+                #                                 break
 
-#                         if cell_type[ids.index(correct_order[second_idx])] == md_or_code:
-#                             return None
+                #                         if cell_type[ids.index(correct_order[second_idx])] == md_or_code:
+                #                             return None
 
                 second_id = correct_order[second_idx]
 
