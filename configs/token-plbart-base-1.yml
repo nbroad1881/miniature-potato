@@ -1,18 +1,18 @@
 # RunArguments
 DEBUG: yes
-n_debug: 1e4
+n_debug: 25000
 n_gpu: 1
 num_proc: 7
 
 
-min_score_to_save: 0.8
-use_8bit: yes
+min_score_to_save: 0.9
+use_8bit: no
 use_layerwise_lr: no
 layer_lr_alpha: 0.8
 
 # data
 k_folds: 5
-max_length: 1536
+max_length: 1024
 padding: no
 stride: 0
 data_dir: "./data"
@@ -20,10 +20,11 @@ lowercase: yes
 stratify_on: "length_bin"
 fold_groups: "ancestor_id"
 load_from_disk: 
-pad_multiple: 512
+pad_multiple: 8
+dataset_name: "ai4code"
 
 # model
-model_name_or_path: "allenai/longformer-base-4096"
+model_name_or_path: "uclanlp/plbart-base"
 reinit_layers: 0
 layer_norm_eps: 1e-7
 dropout: 0.2
@@ -45,10 +46,11 @@ freeze_embeds: no
 # WandB Config
 project: ai4code
 entity: nbroad
-group: exp-1
+group: token
 tags:
- - debugging
-notes: >
+ - token
+notes: > 
+  Testing out plbart
   
 job_type: train
 
@@ -57,7 +59,7 @@ job_type: train
 training_arguments:
 # output
   output_dir: "./"
-  overwrite_output_dir: no
+  overwrite_output_dir: yes
 
 # dataloader
   dataloader_num_workers: 4
@@ -69,15 +71,15 @@ training_arguments:
   seed: 18
 
 # hyperparams
-  per_device_train_batch_size: 8
+  per_device_train_batch_size: 32
   gradient_accumulation_steps: 1
   gradient_checkpointing: no
   group_by_length: yes
-  learning_rate: 1e-5
+  learning_rate: 3e-5
   weight_decay: .01
 
 # schedule + steps
-  num_train_epochs: 5
+  num_train_epochs: 3
   lr_scheduler_type: cosine
   warmup_ratio: 0.1
   warmup_steps: 0
@@ -122,7 +124,7 @@ training_arguments:
   evaluation_strategy: "epoch"
   eval_steps: 500
   eval_delay: 0
-  per_device_eval_batch_size: 24
+  per_device_eval_batch_size: 64
   do_predict:
   
 # hub

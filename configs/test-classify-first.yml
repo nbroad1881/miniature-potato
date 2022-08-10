@@ -17,7 +17,7 @@ padding: no
 stride: 0
 data_dir: "./data"
 lowercase: yes
-stratify_on: "length"
+stratify_on: "length_bin"
 fold_groups: "ancestor_id"
 load_from_disk: 
 pad_multiple: 8
