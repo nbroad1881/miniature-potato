@@ -15,6 +15,7 @@ from sklearn.model_selection import (
 from transformers import (
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    DataCollatorWithPadding,
     DataCollatorForTokenClassification,
     PreTrainedTokenizerBase,
 )
@@ -146,12 +147,10 @@ class TokenClassificationDataModule:
             # end md
         }
 
-        self.tokenizer.add_special_tokens(
-            {"additional_special_tokens": list(self.cls_tkn_map.values())}
-        )
+        self.tokenizer.add_tokens(list(self.cls_tkn_map.values()))
         self.cls_id_map = {
-            "code": self.tokenizer.encode(self.cls_tkn_map["code"])[1],
-            "markdown": self.tokenizer.encode(self.cls_tkn_map["markdown"])[1],
+            "code": self.tokenizer(self.cls_tkn_map["code"], add_special_tokens=False).input_ids[0],
+            "markdown": self.tokenizer(self.cls_tkn_map["markdown"], add_special_tokens=False).input_ids[0],
         }
 
     def prepare_datasets(self):
@@ -205,7 +204,7 @@ class TokenClassificationDataModule:
             example["source"],
             padding=False,
             truncation=False,
-            add_special_tokens=True,
+            add_special_tokens=False,
         )
 
         num_code_cells = sum([x == "code" for x in example["cell_type"]])
@@ -220,43 +219,90 @@ class TokenClassificationDataModule:
         total_tokens = num_code_tokens + num_md_tokens
 
         # get rid of first cls and last eos
-        input_ids = [x[1:-1] for x in tokenized["input_ids"]]
+        # input_ids = [x[1:-1] for x in tokenized["input_ids"]]
 
-        new_ids = []
+        
         max_length = self.cfg["max_length"]
         num_code_tokens_per_cell = 24
-        num_md_tokens_per_cell = None
+        num_md_tokens_per_cell = 1000
+        num_cls_tokens = len(example["source"])
+        
+        if total_tokens > max_length - num_cls_tokens:
+            total_tokens = num_md_tokens + num_code_tokens_per_cell*num_code_cells
+            
+        if total_tokens > max_length - num_cls_tokens:
+            num_code_tokens_per_cell = 12
+            total_tokens = num_md_tokens + num_code_tokens_per_cell*num_code_cells
+            
+        if total_tokens > max_length - num_cls_tokens:
+            num_code_tokens_per_cell = 6
+            total_tokens = num_md_tokens + num_code_tokens_per_cell*num_code_cells
+        
+        if total_tokens > max_length - num_cls_tokens:
+            num_code_tokens_per_cell = 6
+            num_md_tokens_per_cell = max_length - num_cls_tokens - num_code_tokens_per_cell*num_code_cells
+            
+            total_tokens = num_md_tokens_per_cell*num_md_cells + num_code_tokens_per_cell*num_code_cells
+            
 
-        # If the total number of tokens is more than limit
-        if total_tokens > (max_length - len(example["source"])):
+        if num_md_tokens_per_cell < 0 or total_tokens > max_length - num_cls_tokens:
+            num_code_tokens_per_cell = 1
+            num_md_tokens_per_cell = max_length - num_cls_tokens - num_code_tokens_per_cell*num_code_cells
 
-            # If there are more markdown tokens than acceptable
-            if num_md_tokens > (
-                max_length
-                - len(example["source"])
-                - num_code_cells * num_code_tokens_per_cell
-            ):
-                num_md_tokens_per_cell = (
-                    max_length
-                    - len(example["source"])
-                    - num_code_cells * num_code_tokens_per_cell
-                ) // num_md_cells
+            total_tokens = num_md_tokens_per_cell*num_md_cells + num_code_tokens_per_cell*num_code_cells
 
-            for ids, cell_type in zip(input_ids, example["cell_type"]):
-                if cell_type == "markdown":
-                    if num_md_tokens_per_cell:
-                        new_ids.append(ids[:num_md_tokens_per_cell])
-                    else:
-                        new_ids.append(ids)
-                if cell_type == "code":
-                    new_ids.append(ids[:num_code_tokens_per_cell])
+        if num_md_tokens_per_cell < 0 or total_tokens > max_length - num_cls_tokens:
+            num_code_tokens_per_cell = 6
+            num_md_tokens_per_cell = (max_length - num_cls_tokens - num_code_tokens_per_cell*num_code_cells)//num_md_cells
 
-            return {"input_id_list": new_ids}
+        if num_md_tokens_per_cell < 0 or total_tokens > max_length - num_cls_tokens:
+            num_code_tokens_per_cell = 0
+            num_md_tokens_per_cell = (max_length - num_cls_tokens - num_code_tokens_per_cell*num_code_cells)//num_md_cells
+            
+        new_ids = []
+        for ids, cell_type in zip(tokenized["input_ids"], example["cell_type"]):
+            if cell_type == "markdown":
+                new_ids.append(ids[:num_md_tokens_per_cell])
+            elif cell_type == "code":
+                new_ids.append(ids[:num_code_tokens_per_cell])
 
-        return {"input_id_list": input_ids}
+
+        return {"input_id_list": new_ids}
+            
+        # estimated_num_code_tokens = num_code_tokens_per_cell*num_code_cells
+        
+#         if num_md_tokens > max_length - num_cls_tokens:
+#             num_code_tokens_per_cell = 12
+#             num_md_tokens_per_cell = (max_length - num_cls_tokens - num_code_tokens_per_cell*num_code_cells)//num_md_cells
+            
+#             if num_md_tokens_per_cell < 0:
+#                 num_md_tokens_per_cell = (max_length - num_cls_tokens)//num_md_cells
+#                 num_code_tokens_per_cell = 0                    
+
+#             new_ids = []
+#             for ids, cell_type in zip(tokenized["input_ids"], example["cell_type"]):
+#                 if cell_type == "markdown":
+#                     if num_md_tokens_per_cell:
+#                         new_ids.append(ids[:num_md_tokens_per_cell])
+#                     else:
+#                         new_ids.append(ids)
+#                 elif cell_type == "code":
+#                     new_ids.append(ids[:num_code_tokens_per_cell])
+                    
+#             if len(new_ids) != len(example["cell_type"]):
+#                 import pdb; pdb.set_trace()
+
+#             return {"input_id_list": new_ids}
+        
+#         while num_md_tokens > max_length - num_cls_tokens - num_code_tokens_per_cell*num_code_cells:
+#             num_code_tokens_per_cell = num_code_tokens_per_cell//2
+
+        return {"input_id_list": tokenized["input_ids"]}
 
     def add_cls_tokens(self, example, max_length=1024):
         new_ids = []
+        
+        # import pdb; pdb.set_trace()
 
         for cell_type, ids in zip(example["cell_type"], example["input_id_list"]):
             new_ids.extend([self.cls_id_map[cell_type]] + ids)
@@ -264,6 +310,7 @@ class TokenClassificationDataModule:
         attention_mask = (
             [1] * len(new_ids) if len(new_ids) < max_length else [1] * max_length
         )
+        # import pdb; pdb.set_trace()
 
         return {
             "input_ids": new_ids[:max_length],
@@ -808,6 +855,10 @@ class AI4CodeDataCollator(DataCollatorForTokenClassification):
     return_tensors = "pt"
 
     def torch_call(self, features):
+        
+        # print(features)
+        
+        
         import torch
 
         label_name = "label" if "label" in features[0].keys() else "labels"
@@ -849,8 +900,30 @@ class AI4CodeDataCollator(DataCollatorForTokenClassification):
         }
         batch[label_name] = labels
 
-        masking_prob = os.getenv("MASKING_PROB")
-        if masking_prob is not None and masking_prob != "0":
-            batch = self.mask_tokens(batch, float(masking_prob))
+        # masking_prob = os.getenv("MASKING_PROB")
+        # if masking_prob is not None and masking_prob != "0":
+        #     batch = self.mask_tokens(batch, float(masking_prob))
+
+        return batch
+
+    
+@dataclass
+class DataCollatorFloatLabels(DataCollatorWithPadding):
+    def __call__(self, *args, **kwargs):
+        batch = super().__call__(*args, **kwargs)
+
+        batch["labels"] = batch.pop("labels").float()
+        
+        padding_side = self.tokenizer.padding_side
+        if padding_side == "right":
+            batch["labels"] = [
+                list(label) + [self.label_pad_token_id] * (sequence_length - len(label))
+                for label in labels
+            ]
+        else:
+            batch["labels"] = [
+                [self.label_pad_token_id] * (sequence_length - len(label)) + list(label)
+                for label in labels
+            ]
 
         return batch
