@@ -55,7 +55,6 @@ class AI4CodeModel(PreTrainedModel):
         )[0]
 
         mask = torch.isin(input_ids, self.cls_token_ids.to(input_ids.device))
-        # import pdb; pdb.set_trace()
         loss = None
         if labels is not None:
 
@@ -74,7 +73,7 @@ class AI4CodeModel(PreTrainedModel):
         else:
             logits = self.classifier(self.ln(outputs))
             
-        # import pdb; pdb.set_trace()
+
 
         return ClassifierOutput(
             loss=loss, logits=logits,
