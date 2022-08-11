@@ -1,6 +1,7 @@
 import os
 import datetime
 import argparse
+import random
 from functools import partial
 
 import wandb
@@ -22,6 +23,7 @@ from utils import (
 from data import (
     TokenClassificationDataModule,
     AI4CodeDataCollator,
+    DataCollatorFloatLabels,
 )
 from modeling import (
     get_pretrained,
@@ -34,9 +36,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune on AI4Code dataset")
     parser.add_argument(
-        "--config_file",
+        "config_file",
         type=str,
-        required=True,
         help="Config file",
     )
     parser.add_argument(
@@ -91,10 +92,12 @@ if __name__ == "__main__":
         eval_dataset = dm.get_eval_dataset(fold)
         print(f"Train dataset length: {len(train_dataset)}")
         print(f"Eval dataset length: {len(eval_dataset)}")
+        
+        random_idx = random.choice(list(range(len(train_dataset))))
 
         print(
             "Decode inputs from train_dataset",
-            dm.tokenizer.convert_ids_to_tokens(train_dataset[0]["input_ids"]),
+            dm.tokenizer.convert_ids_to_tokens(train_dataset[random_idx]["input_ids"]),
         )
 
         compute_metrics = partial(
@@ -125,20 +128,20 @@ if __name__ == "__main__":
 
         reinit_model_weights(model, cfg["reinit_layers"], model_config)
 
-        optimizer = create_optimizer(model, args)
+        # optimizer = create_optimizer(model, args)
 
-        steps_per_epoch = (
-            len(train_dataset)
-            // args.per_device_train_batch_size
-            // cfg["n_gpu"]
-            // args.gradient_accumulation_steps
-        )
-        num_training_steps = steps_per_epoch * args.num_train_epochs
+#         steps_per_epoch = (
+#             len(train_dataset)
+#             // args.per_device_train_batch_size
+#             // cfg["n_gpu"]
+#             // args.gradient_accumulation_steps
+#         )
+#         num_training_steps = steps_per_epoch * args.num_train_epochs
 
-        scheduler = create_scheduler(num_training_steps, optimizer, args)
+#         scheduler = create_scheduler(num_training_steps, optimizer, args)
 
         collator = AI4CodeDataCollator(
-            tokenizer=dm.tokenizer, pad_to_multiple_of=cfg["pad_multiple"], padding=True
+            tokenizer=dm.tokenizer, pad_to_multiple_of=cfg["pad_multiple"], padding=True, max_length=cfg["max_length"]
         )
 
         trainer = Trainer(
@@ -150,7 +153,7 @@ if __name__ == "__main__":
             tokenizer=dm.tokenizer,
             callbacks=callbacks,
             data_collator=collator,
-            optimizers=(optimizer, scheduler),
+            # optimizers=(optimizer, scheduler),
         )
 
         trainer.remove_callback(WandbCallback)
